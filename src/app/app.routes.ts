@@ -21,6 +21,10 @@ export const routes: Routes = [
     loadComponent: () => import('./features/article/pages/home/home.component'),
   },
   {
+    path: 'contact',
+    loadComponent: () => import('./features/contact/contact.component'),
+  },
+  {
     path: 'login',
     loadComponent: () => import('./core/auth/auth.component'),
     canActivate: [() => inject(UserService).isAuthenticated.pipe(map(isAuth => !isAuth))],
