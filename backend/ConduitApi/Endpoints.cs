@@ -1,6 +1,7 @@
 using System.Linq.Expressions;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 
@@ -20,8 +21,8 @@ public static partial class Endpoints
         api.MapPut("/user", UpdateCurrentUser);
 
         api.MapGet("/profiles/{username}", GetProfile);
-        api.MapPost("/profiles/{username}/follow", (string username, HttpContext ctx, AppDb db, TokenService ts) => SetFollow(username, true, ctx, db, ts));
-        api.MapDelete("/profiles/{username}/follow", (string username, HttpContext ctx, AppDb db, TokenService ts) => SetFollow(username, false, ctx, db, ts));
+        api.MapPost("/profiles/{username}/follow", (string username, HttpContext ctx, AppDb db, TokenService ts, IWebHostEnvironment env) => SetFollow(username, true, ctx, db, ts, env));
+        api.MapDelete("/profiles/{username}/follow", (string username, HttpContext ctx, AppDb db, TokenService ts, IWebHostEnvironment env) => SetFollow(username, false, ctx, db, ts, env));
 
         api.MapGet("/articles", ListArticles);
         api.MapGet("/articles/feed", Feed);
@@ -29,19 +30,20 @@ public static partial class Endpoints
         api.MapGet("/articles/{slug}", GetArticle);
         api.MapPut("/articles/{slug}", UpdateArticle);
         api.MapDelete("/articles/{slug}", DeleteArticle);
-        api.MapPost("/articles/{slug}/favorite", (string slug, HttpContext ctx, AppDb db, TokenService ts) => SetFavorite(slug, true, ctx, db, ts));
-        api.MapDelete("/articles/{slug}/favorite", (string slug, HttpContext ctx, AppDb db, TokenService ts) => SetFavorite(slug, false, ctx, db, ts));
+        api.MapPost("/articles/{slug}/favorite", (string slug, HttpContext ctx, AppDb db, TokenService ts, IWebHostEnvironment env) => SetFavorite(slug, true, ctx, db, ts, env));
+        api.MapDelete("/articles/{slug}/favorite", (string slug, HttpContext ctx, AppDb db, TokenService ts, IWebHostEnvironment env) => SetFavorite(slug, false, ctx, db, ts, env));
 
         api.MapGet("/articles/{slug}/comments", ListComments);
         api.MapPost("/articles/{slug}/comments", AddComment);
         api.MapDelete("/articles/{slug}/comments/{id}", DeleteComment);
 
         api.MapGet("/tags", ListTags);
+        api.MapPost("/users/logout", Logout);
     }
 
     // ---------- Users ----------
 
-    private static async Task<IResult> Register(HttpContext ctx, AppDb db, TokenService ts, IPasswordHasher<User> hasher)
+    private static async Task<IResult> Register(HttpContext ctx, AppDb db, TokenService ts, IPasswordHasher<User> hasher, IWebHostEnvironment env)
     {
         var o = await ReadBody(ctx, "user");
         if (o is null) return InvalidBody();
@@ -65,10 +67,12 @@ public static partial class Endpoints
         db.Users.Add(user);
         await db.SaveChangesAsync();
 
-        return Results.Json(new { user = ToDto(user, ts.Create(user)) }, statusCode: 201);
+        var token = ts.Create(user);
+        TokenService.SetJwtCookie(ctx, token, env);
+        return Results.Json(new { user = ToDto(user, token) }, statusCode: 201);
     }
 
-    private static async Task<IResult> Login(HttpContext ctx, AppDb db, TokenService ts, IPasswordHasher<User> hasher)
+    private static async Task<IResult> Login(HttpContext ctx, AppDb db, TokenService ts, IPasswordHasher<User> hasher, IWebHostEnvironment env)
     {
         var o = await ReadBody(ctx, "user");
         if (o is null) return InvalidBody();
@@ -91,7 +95,15 @@ public static partial class Endpoints
             await db.SaveChangesAsync();
         }
 
-        return Results.Ok(new { user = ToDto(user!, ts.Create(user!)) });
+        var token = ts.Create(user!);
+        TokenService.SetJwtCookie(ctx, token, env);
+        return Results.Ok(new { user = ToDto(user!, token) });
+    }
+
+    private static IResult Logout(HttpContext ctx)
+    {
+        TokenService.ClearJwtCookie(ctx);
+        return Results.Ok(new { });
     }
 
     private static async Task<IResult> GetCurrentUser(HttpContext ctx, AppDb db, TokenService ts)
@@ -154,7 +166,7 @@ public static partial class Endpoints
         return profile is null ? Error(404, "profile", "not found") : Results.Ok(new { profile });
     }
 
-    private static async Task<IResult> SetFollow(string username, bool follow, HttpContext ctx, AppDb db, TokenService ts)
+    private static async Task<IResult> SetFollow(string username, bool follow, HttpContext ctx, AppDb db, TokenService ts, IWebHostEnvironment env)
     {
         var (me, err) = await RequireUser(ctx, db, ts);
         if (me is null) return err!;
@@ -295,7 +307,7 @@ public static partial class Endpoints
         return Results.NoContent();
     }
 
-    private static async Task<IResult> SetFavorite(string slug, bool favorite, HttpContext ctx, AppDb db, TokenService ts)
+    private static async Task<IResult> SetFavorite(string slug, bool favorite, HttpContext ctx, AppDb db, TokenService ts, IWebHostEnvironment env)
     {
         var (me, err) = await RequireUser(ctx, db, ts);
         if (me is null) return err!;

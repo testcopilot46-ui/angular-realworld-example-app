@@ -1,6 +1,7 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.IdentityModel.Tokens;
 
 namespace ConduitApi;
@@ -11,11 +12,19 @@ public class TokenService
     private readonly SymmetricSecurityKey _key;
     private readonly TimeSpan _lifetime;
 
-    public TokenService(IConfiguration config)
+    public TokenService(IConfiguration config, IWebHostEnvironment env)
     {
         var secret = config["Jwt:Key"];
+
+        // In development, fall back to a dev key if not set via environment variable
+        if (string.IsNullOrEmpty(secret) && env.IsDevelopment())
+        {
+            secret = "dev-only-insecure-key-change-me-0123456789abcdef";
+        }
+
         if (string.IsNullOrEmpty(secret) || Encoding.UTF8.GetByteCount(secret) < 32)
-            throw new InvalidOperationException("Jwt:Key must be set to a secret of at least 32 bytes.");
+            throw new InvalidOperationException("Jwt:Key must be set to a secret of at least 32 bytes via environment variable JWT__Key or appsettings.json.");
+
         _key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secret));
         _lifetime = TimeSpan.FromDays(config.GetValue("Jwt:ExpiryDays", 7));
     }
@@ -53,11 +62,37 @@ public class TokenService
 
     public static string? ReadToken(HttpContext ctx)
     {
+        // First check Authorization header (for backward compatibility during transition)
         var header = ctx.Request.Headers.Authorization.ToString();
-        var parts = header.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        if (parts.Length != 2) return null;
-        return parts[0].Equals("Token", StringComparison.OrdinalIgnoreCase) || parts[0].Equals("Bearer", StringComparison.OrdinalIgnoreCase)
-            ? parts[1]
-            : null;
+        if (!string.IsNullOrEmpty(header))
+        {
+            var parts = header.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (parts.Length == 2 &&
+                (parts[0].Equals("Token", StringComparison.OrdinalIgnoreCase) ||
+                 parts[0].Equals("Bearer", StringComparison.OrdinalIgnoreCase)))
+            {
+                return parts[1];
+            }
+        }
+
+        // Fall back to httpOnly cookie
+        return ctx.Request.Cookies["jwt"];
+    }
+
+    public static void SetJwtCookie(HttpContext ctx, string token, IWebHostEnvironment env)
+    {
+        var cookieOptions = new CookieOptions
+        {
+            HttpOnly = true,
+            Secure = !env.IsDevelopment(),
+            SameSite = SameSiteMode.Strict,
+            Expires = DateTime.UtcNow.AddDays(7)
+        };
+        ctx.Response.Cookies.Append("jwt", token, cookieOptions);
+    }
+
+    public static void ClearJwtCookie(HttpContext ctx)
+    {
+        ctx.Response.Cookies.Delete("jwt");
     }
 }

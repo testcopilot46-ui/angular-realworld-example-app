@@ -25,8 +25,13 @@ Override it with an environment variable for another instance or SQL authenticat
 ConnectionStrings__Default="Server=localhost;Database=ConduitDb;User Id=sa;Password=<password>;TrustServerCertificate=True" dotnet run
 ```
 
-`appsettings.Development.json` contains a development-only JWT key. Outside Development, set `Jwt__Key`
-to a random secret of at least 32 bytes.
+Set the JWT secret via environment variable for production:
+
+```bash
+Jwt__Key="your-random-secret-at-least-32-bytes" dotnet run
+```
+
+Or use a `.env` file (see `.env.example` for reference). The development environment falls back to a dev key if not set.
 
 ## Frontend
 

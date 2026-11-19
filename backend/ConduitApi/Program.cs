@@ -5,15 +5,21 @@ using Microsoft.EntityFrameworkCore;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddDbContext<AppDb>(o => o.UseSqlServer(builder.Configuration.GetConnectionString("Default")));
-builder.Services.AddSingleton<TokenService>();
+builder.Services.AddSingleton<TokenService>(sp => new TokenService(
+    sp.GetRequiredService<IConfiguration>(),
+    sp.GetRequiredService<IWebHostEnvironment>()
+));
 builder.Services.AddSingleton<IPasswordHasher<User>, PasswordHasher<User>>();
+builder.Services.AddSingleton<IWebHostEnvironment>(builder.Environment);
 builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new UtcDateTimeConverter()));
 builder.Services.AddCors(o => o.AddDefaultPolicy(p => p
     .WithOrigins(builder.Configuration.GetSection("Cors:Origins").Get<string[]>() ?? ["http://localhost:4200"])
     .AllowAnyHeader()
-    .AllowAnyMethod()));
+    .AllowAnyMethod()
+    .AllowCredentials()));
 
 var app = builder.Build();
+var isDevelopment = builder.Environment.IsDevelopment();
 
 app.Services.GetRequiredService<TokenService>();
 using (var scope = app.Services.CreateScope())
@@ -22,6 +28,34 @@ using (var scope = app.Services.CreateScope())
 }
 
 app.UseCors();
+
+app.Use(async (context, next) =>
+{
+    context.Response.Headers.Append("X-Content-Type-Options", "nosniff");
+    context.Response.Headers.Append("X-Frame-Options", "DENY");
+    context.Response.Headers.Append("X-XSS-Protection", "1; mode=block");
+    context.Response.Headers.Append("Referrer-Policy", "strict-origin-when-cross-origin");
+
+    // Content-Security-Policy
+    var csp = "default-src 'self'; " +
+               "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
+               "style-src 'self' 'unsafe-inline'; " +
+               "img-src 'self' data: https:; " +
+               "font-src 'self'; " +
+               "connect-src 'self' http://localhost:3000 https://localhost:3000; " +
+               "frame-ancestors 'none'; " +
+               "cookie-preference: 'self';";
+    context.Response.Headers.Append("Content-Security-Policy", csp);
+
+    // HSTS (only in production)
+    if (!isDevelopment)
+    {
+        context.Response.Headers.Append("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+    }
+
+    await next();
+});
+
 app.MapConduitApi();
 
 app.Run();
