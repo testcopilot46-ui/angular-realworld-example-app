@@ -54,6 +54,8 @@ public static partial class Endpoints
 
         var errors = new Errors();
         if (string.IsNullOrWhiteSpace(username)) errors.Add("username", "can't be blank");
+        else if (username.Length > 50) errors.Add("username", "is too long (maximum is 50 characters)");
+        else if (!System.Text.RegularExpressions.Regex.IsMatch(username, "^[a-zA-Z0-9_-]+$")) errors.Add("username", "can only contain letters, numbers, underscores, and hyphens");
         ValidateEmail(email, errors);
         ValidatePassword(password, errors);
         if (errors.Any) return errors.Result(422);
@@ -69,7 +71,7 @@ public static partial class Endpoints
 
         var token = ts.Create(user);
         TokenService.SetJwtCookie(ctx, token, env);
-        return Results.Json(new { user = ToDto(user, token) }, statusCode: 201);
+        return Results.Json(new { user = ToDto(user) }, statusCode: 201);
     }
 
     private static async Task<IResult> Login(HttpContext ctx, AppDb db, TokenService ts, IPasswordHasher<User> hasher, IWebHostEnvironment env)
@@ -97,7 +99,7 @@ public static partial class Endpoints
 
         var token = ts.Create(user!);
         TokenService.SetJwtCookie(ctx, token, env);
-        return Results.Ok(new { user = ToDto(user!, token) });
+        return Results.Ok(new { user = ToDto(user!) });
     }
 
     private static IResult Logout(HttpContext ctx)
@@ -110,7 +112,7 @@ public static partial class Endpoints
     {
         var (user, err) = await RequireUser(ctx, db, ts);
         if (user is null) return err!;
-        return Results.Ok(new { user = ToDto(user, TokenService.ReadToken(ctx)!) });
+        return Results.Ok(new { user = ToDto(user) });
     }
 
     private static async Task<IResult> UpdateCurrentUser(HttpContext ctx, AppDb db, TokenService ts, IPasswordHasher<User> hasher)
@@ -154,7 +156,7 @@ public static partial class Endpoints
         if (o.ContainsKey("image")) user.Image = NullIfEmpty(Str(o, "image"));
         await db.SaveChangesAsync();
 
-        return Results.Ok(new { user = ToDto(user, ts.Create(user)) });
+        return Results.Ok(new { user = ToDto(user) });
     }
 
     // ---------- Profiles ----------
@@ -228,6 +230,12 @@ public static partial class Endpoints
         var tags = o.ContainsKey("tagList") && o["tagList"] is not null ? ReadTags(o, errors) : [];
         if (errors.Any) return errors.Result(422);
 
+        // Deduplicate tags case-insensitively to avoid DB conflicts
+        if (tags != null)
+        {
+            tags = tags.GroupBy(t => t.ToLowerInvariant()).Select(g => g.First()).ToList();
+        }
+
         var now = Now();
         var article = new Article
         {
@@ -276,7 +284,15 @@ public static partial class Endpoints
             body = Str(o, "body");
             if (string.IsNullOrWhiteSpace(body)) errors.Add("body", "can't be blank");
         }
-        if (o.ContainsKey("tagList")) tags = ReadTags(o, errors);
+        if (o.ContainsKey("tagList"))
+        {
+            tags = ReadTags(o, errors);
+            // Deduplicate tags case-insensitively
+            if (tags != null)
+            {
+                tags = tags.GroupBy(t => t.ToLowerInvariant()).Select(g => g.First()).ToList();
+            }
+        }
         if (errors.Any) return errors.Result(422);
 
         if (title is not null) article.Title = title;
@@ -472,6 +488,11 @@ public static partial class Endpoints
         if (baseSlug.Length > 200) baseSlug = baseSlug[..200].TrimEnd('-');
 
         var slug = baseSlug;
+        // Reserve "feed" to avoid conflict with feed endpoint
+        if (slug == "feed")
+        {
+            slug = $"{baseSlug}-article";
+        }
         while (await db.Articles.AnyAsync(a => a.Slug == slug))
             slug = $"{baseSlug}-{Guid.NewGuid().ToString("N")[..6]}";
         return slug;
@@ -514,7 +535,7 @@ public static partial class Endpoints
         return new DateTime(ticks - ticks % TimeSpan.TicksPerMillisecond, DateTimeKind.Utc);
     }
 
-    private static UserDto ToDto(User u, string token) => new(u.Username, u.Email, u.Bio, u.Image, token);
+    private static UserDto ToDto(User u, string? token = null) => new(u.Username, u.Email, u.Bio, u.Image, token ?? "");
 
     private static IResult Error(int status, string field, string message) =>
         Results.Json(new { errors = new Dictionary<string, string[]> { [field] = [message] } }, statusCode: status);

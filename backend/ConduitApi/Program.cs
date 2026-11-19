@@ -30,6 +30,7 @@ using (var scope = app.Services.CreateScope())
 app.UseCors();
 app.UseMiddleware<RequestLoggingMiddleware>();
 app.UseMiddleware<RateLimitMiddleware>();
+app.UseMiddleware<CsrfProtectionMiddleware>();
 
 app.Use(async (context, next) =>
 {

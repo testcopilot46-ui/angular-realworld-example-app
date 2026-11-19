@@ -39,9 +39,7 @@ public class RateLimitMiddleware
             entry.WindowStart = now;
         }
 
-        entry.Count++;
-
-        if (entry.Count > _maxRequests)
+        if (entry.IncrementAndCheck(_maxRequests))
         {
             context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
             await context.Response.WriteAsync("Rate limit exceeded. Please try again later.");
@@ -79,7 +77,22 @@ public class RateLimitMiddleware
 
     private class RateLimitEntry
     {
-        public int Count { get; set; }
+        private int _count;
+        public int Count
+        {
+            get => _count;
+            set => _count = value;
+        }
         public DateTime WindowStart { get; set; }
+        private readonly object _lock = new();
+
+        public bool IncrementAndCheck(int maxRequests)
+        {
+            lock (_lock)
+            {
+                _count++;
+                return _count > maxRequests;
+            }
+        }
     }
 }

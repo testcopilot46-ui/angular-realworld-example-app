@@ -47,22 +47,18 @@ function setupDebugInterface(jwtService: JwtService, userService: UserService): 
 /**
  * App initializer: checks auth state at startup.
  *
- * - No token → purgeAuth() to exit 'loading' state → 'unauthenticated'
- * - Token exists → getCurrentUser() to validate it:
- *     - Success → 'authenticated'
- *     - 4XX → 'unauthenticated' (invalid token, cleared)
- *     - 5XX → 'unavailable' (server down, token kept, auto-retry)
+ * With httpOnly cookies, we can't check for token existence client-side.
+ * Always call getCurrentUser() and let the server handle auth via cookie:
+ *   - Success → 'authenticated'
+ *   - 4XX → 'unauthenticated' (no valid cookie)
+ *   - 5XX → 'unavailable' (server down, auto-retry)
  */
 export function initAuth(jwtService: JwtService, userService: UserService) {
   return () => {
     setupDebugInterface(jwtService, userService);
 
-    if (jwtService.getToken()) {
-      return userService.getCurrentUser();
-    } else {
-      userService.purgeAuth();
-      return EMPTY;
-    }
+    // Always try to get current user - server will check httpOnly cookie
+    return userService.getCurrentUser();
   };
 }
 

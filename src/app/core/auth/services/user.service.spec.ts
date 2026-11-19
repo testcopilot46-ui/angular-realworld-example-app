@@ -104,6 +104,8 @@ describe('UserService', () => {
       const req = httpMock.expectOne('/users/login');
       req.flush({ user: mockUser });
       await promise;
+      // With httpOnly cookies, jwtService.saveToken is a no-op
+      // The backend sets the cookie automatically
       expect(jwtService.saveToken).toHaveBeenCalledWith(mockUser.token);
     });
 

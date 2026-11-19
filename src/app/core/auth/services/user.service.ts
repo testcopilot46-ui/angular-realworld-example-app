@@ -88,7 +88,8 @@ export class UserService {
         void this.router.navigate(['/']);
       },
       error: () => {
-        // Even if logout fails, clear local state
+        // Even if logout fails, try to clear cookie via alternative method
+        // and clear local state
         this.purgeAuth();
         void this.router.navigate(['/']);
       },
