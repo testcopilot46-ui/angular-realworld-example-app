@@ -14,8 +14,8 @@ builder.Services.AddSingleton<IWebHostEnvironment>(builder.Environment);
 builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new UtcDateTimeConverter()));
 builder.Services.AddCors(o => o.AddDefaultPolicy(p => p
     .WithOrigins(builder.Configuration.GetSection("Cors:Origins").Get<string[]>() ?? ["http://localhost:4200"])
-    .AllowAnyHeader()
-    .AllowAnyMethod()
+    .WithHeaders("Content-Type", "Authorization")
+    .WithMethods("GET", "POST", "PUT", "DELETE", "PATCH")
     .AllowCredentials()));
 
 var app = builder.Build();
@@ -28,6 +28,8 @@ using (var scope = app.Services.CreateScope())
 }
 
 app.UseCors();
+app.UseMiddleware<RequestLoggingMiddleware>();
+app.UseMiddleware<RateLimitMiddleware>();
 
 app.Use(async (context, next) =>
 {
