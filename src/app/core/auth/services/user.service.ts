@@ -82,7 +82,7 @@ export class UserService {
   }
 
   logout(): void {
-    this.http.post('/api/users/logout', {}).subscribe({
+    this.http.post('/users/logout', {}).subscribe({
       complete: () => {
         this.purgeAuth();
         void this.router.navigate(['/']);
@@ -179,8 +179,6 @@ export class UserService {
   purgeAuth(): void {
     this.cancelRetry();
     this.retryAttempt = 0;
-    // Clear httpOnly cookie via logout endpoint
-    this.http.post('/api/users/logout', {}).subscribe();
     this.currentUserSubject.next(null);
     this.authStateSubject.next('unauthenticated');
   }
