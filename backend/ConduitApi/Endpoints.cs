@@ -54,7 +54,7 @@ public static partial class Endpoints
 
         var errors = new Errors();
         if (string.IsNullOrWhiteSpace(username)) errors.Add("username", "can't be blank");
-        else if (username.Length > 50) errors.Add("username", "is too long (maximum is 50 characters)");
+        else if (username.Length > 100) errors.Add("username", "is too long (maximum is 100 characters)");
         else if (!System.Text.RegularExpressions.Regex.IsMatch(username, "^[a-zA-Z0-9_-]+$")) errors.Add("username", "can only contain letters, numbers, underscores, and hyphens");
         ValidateEmail(email, errors);
         ValidatePassword(password, errors);
@@ -67,7 +67,27 @@ public static partial class Endpoints
         var user = new User { Username = username!, Email = email! };
         user.PasswordHash = hasher.HashPassword(user, password!);
         db.Users.Add(user);
-        await db.SaveChangesAsync();
+
+        try
+        {
+            await db.SaveChangesAsync();
+        }
+        catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
+        {
+            // Handle race condition: another request created the user between our check and insert
+            db.Entry(user).State = EntityState.Detached;
+            
+            // Re-check which field conflicts
+            if (await db.Users.AnyAsync(u => u.Username == username))
+                errors.Add("username", "has already been taken");
+            if (await db.Users.AnyAsync(u => u.Email == email))
+                errors.Add("email", "has already been taken");
+            
+            if (errors.Any) return errors.Result(409);
+            
+            // If no specific field conflicts, rethrow
+            throw;
+        }
 
         var token = ts.Create(user);
         TokenService.SetJwtCookie(ctx, token, env);
@@ -130,6 +150,8 @@ public static partial class Endpoints
         {
             username = Str(o, "username")?.Trim();
             if (string.IsNullOrWhiteSpace(username)) errors.Add("username", "can't be blank");
+            else if (username.Length > 100) errors.Add("username", "is too long (maximum is 100 characters)");
+            else if (!System.Text.RegularExpressions.Regex.IsMatch(username, "^[a-zA-Z0-9_-]+$")) errors.Add("username", "can only contain letters, numbers, underscores, and hyphens");
         }
         if (o.ContainsKey("email"))
         {
@@ -140,6 +162,16 @@ public static partial class Endpoints
         {
             password = Str(o, "password");
             ValidatePassword(password, errors);
+        }
+        if (o.ContainsKey("bio"))
+        {
+            var bio = Str(o, "bio");
+            if (bio != null && bio.Length > 1000) errors.Add("bio", "is too long (maximum is 1000 characters)");
+        }
+        if (o.ContainsKey("image"))
+        {
+            var image = Str(o, "image");
+            if (image != null && image.Length > 500) errors.Add("image", "is too long (maximum is 500 characters)");
         }
         if (errors.Any) return errors.Result(422);
 
@@ -225,8 +257,11 @@ public static partial class Endpoints
         var description = Str(o, "description")?.Trim();
         var body = Str(o, "body");
         if (string.IsNullOrWhiteSpace(title)) errors.Add("title", "can't be blank");
+        else if (title.Length > 200) errors.Add("title", "is too long (maximum is 200 characters)");
         if (string.IsNullOrWhiteSpace(description)) errors.Add("description", "can't be blank");
+        else if (description.Length > 500) errors.Add("description", "is too long (maximum is 500 characters)");
         if (string.IsNullOrWhiteSpace(body)) errors.Add("body", "can't be blank");
+        else if (body.Length > 10000) errors.Add("body", "is too long (maximum is 10000 characters)");
         var tags = o.ContainsKey("tagList") && o["tagList"] is not null ? ReadTags(o, errors) : [];
         if (errors.Any) return errors.Result(422);
 
@@ -249,7 +284,13 @@ public static partial class Endpoints
         };
         await SetTags(db, article, tags!);
         db.Articles.Add(article);
-        await db.SaveChangesAsync();
+
+        // Retry on unique constraint violation (concurrent slug or tag conflicts)
+        await WithDbRetryAsync(async () =>
+        {
+            await db.SaveChangesAsync();
+            return true;
+        });
 
         return Results.Json(new { article = await LoadArticle(db, article.Slug, me.Id) }, statusCode: 201);
     }
@@ -467,7 +508,19 @@ public static partial class Endpoints
             errors.Add("tagList", "must be an array of strings");
             return null;
         }
-        return arr.Select(t => t!.GetValue<string>().Trim()).Where(t => t.Length > 0).Distinct().ToList();
+        
+        var tags = arr.Select(t => t!.GetValue<string>().Trim()).Where(t => t.Length > 0).Distinct().ToList();
+        
+        // Validate tag lengths
+        foreach (var tag in tags)
+        {
+            if (tag.Length > 100)
+            {
+                errors.Add("tagList", $"tag '{tag.Substring(0, Math.Min(20, tag.Length))}...' is too long (maximum is 100 characters)");
+            }
+        }
+        
+        return tags;
     }
 
     private static async Task SetTags(AppDb db, Article article, List<string> names)
@@ -501,6 +554,7 @@ public static partial class Endpoints
     private static void ValidateEmail(string? email, Errors errors)
     {
         if (string.IsNullOrWhiteSpace(email)) errors.Add("email", "can't be blank");
+        else if (email.Length > 256) errors.Add("email", "is too long (maximum is 256 characters)");
         else if (!EmailPattern().IsMatch(email)) errors.Add("email", "is invalid");
     }
 
@@ -535,7 +589,40 @@ public static partial class Endpoints
         return new DateTime(ticks - ticks % TimeSpan.TicksPerMillisecond, DateTimeKind.Utc);
     }
 
-    private static UserDto ToDto(User u, string? token = null) => new(u.Username, u.Email, u.Bio, u.Image, token ?? "");
+    private static UserDto ToDto(User u) => new(u.Username, u.Email, u.Bio, u.Image);
+
+    /// <summary>
+    /// Execute an operation with retry logic for database unique constraint violations.
+    /// Retries up to 3 times with exponential backoff for transient conflicts.
+    /// </summary>
+    private static async Task<T> WithDbRetryAsync<T>(Func<Task<T>> operation, int maxRetries = 3)
+    {
+        for (int attempt = 0; attempt < maxRetries; attempt++)
+        {
+            try
+            {
+                return await operation();
+            }
+            catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex) && attempt < maxRetries - 1)
+            {
+                // Wait with exponential backoff before retry
+                await Task.Delay(TimeSpan.FromMilliseconds(100 * Math.Pow(2, attempt)));
+            }
+        }
+        // Final attempt - let the exception bubble up
+        return await operation();
+    }
+
+    private static bool IsUniqueConstraintViolation(DbUpdateException ex)
+    {
+        // Check for SQL Server unique constraint violation (error 2601 or 2627)
+        var innerException = ex.InnerException as Microsoft.Data.SqlClient.SqlException;
+        if (innerException != null)
+        {
+            return innerException.Number == 2601 || innerException.Number == 2627;
+        }
+        return false;
+    }
 
     private static IResult Error(int status, string field, string message) =>
         Results.Json(new { errors = new Dictionary<string, string[]> { [field] = [message] } }, statusCode: status);

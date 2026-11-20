@@ -4,7 +4,7 @@ using System.Text.Json.Serialization;
 
 namespace ConduitApi;
 
-public record UserDto(string Username, string Email, string? Bio, string? Image, string Token);
+public record UserDto(string Username, string Email, string? Bio, string? Image);
 
 public record ProfileDto(string Username, string? Bio, string? Image, bool Following);
 

@@ -82,15 +82,20 @@ export class UserService {
   }
 
   logout(): void {
+    // Always clear local state immediately for UX
+    this.purgeAuth();
+
+    // Attempt to clear cookie via backend, but don't block navigation
     this.http.post('/users/logout', {}).subscribe({
-      complete: () => {
-        this.purgeAuth();
+      next: () => {
+        // Cookie cleared successfully
         void this.router.navigate(['/']);
       },
-      error: () => {
-        // Even if logout fails, try to clear cookie via alternative method
-        // and clear local state
-        this.purgeAuth();
+      error: err => {
+        // Even if logout API fails, we've already cleared local state
+        // The httpOnly cookie may remain, but user sees logged-out UI
+        // On next page load, initAuth will check with backend
+        console.warn('Logout API failed, but local state cleared:', err);
         void this.router.navigate(['/']);
       },
     });

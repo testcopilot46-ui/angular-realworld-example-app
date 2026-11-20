@@ -15,7 +15,6 @@ describe('UserService', () => {
 
   const mockUser: User = {
     email: 'test@example.com',
-    token: 'test-jwt-token',
     username: 'testuser',
     bio: 'Test bio',
     image: 'https://example.com/avatar.jpg',
@@ -106,7 +105,9 @@ describe('UserService', () => {
       await promise;
       // With httpOnly cookies, jwtService.saveToken is a no-op
       // The backend sets the cookie automatically
-      expect(jwtService.saveToken).toHaveBeenCalledWith(mockUser.token);
+      // setAuth is called internally, which updates currentUserSubject
+      const currentUser = await firstValueFrom(service.currentUser);
+      expect(currentUser).toEqual(mockUser);
     });
 
     it('should update currentUser after successful login', async () => {
@@ -158,7 +159,9 @@ describe('UserService', () => {
       const req = httpMock.expectOne('/users');
       req.flush({ user: mockUser });
       await promise;
-      expect(jwtService.saveToken).toHaveBeenCalledWith(mockUser.token);
+      // With httpOnly cookies, jwtService.saveToken is a no-op
+      const currentUser = await firstValueFrom(service.currentUser);
+      expect(currentUser).toEqual(mockUser);
     });
 
     it('should handle registration error', async () => {
@@ -176,9 +179,11 @@ describe('UserService', () => {
   });
 
   describe('logout', () => {
-    it('should call purgeAuth', () => {
+    it('should call purgeAuth and navigate', () => {
       service.logout();
-      expect(jwtService.destroyToken).toHaveBeenCalled();
+      // With httpOnly cookies, destroyToken is a no-op
+      // purgeAuth clears local state
+      expect(router.navigate).toHaveBeenCalledWith(['/']);
     });
 
     it('should navigate to home page', () => {
@@ -214,7 +219,9 @@ describe('UserService', () => {
       const req = httpMock.expectOne('/user');
       req.flush({ user: mockUser });
       await promise;
-      expect(jwtService.saveToken).toHaveBeenCalledWith(mockUser.token);
+      // With httpOnly cookies, jwtService.saveToken is a no-op
+      const currentUser = await firstValueFrom(service.currentUser);
+      expect(currentUser).toEqual(mockUser);
     });
 
     it('should call purgeAuth on error', async () => {
@@ -226,7 +233,10 @@ describe('UserService', () => {
         await promise;
         throw new Error('should have failed');
       } catch (error) {
-        expect(jwtService.destroyToken).toHaveBeenCalled();
+        // With httpOnly cookies, destroyToken is a no-op
+        // purgeAuth clears local state
+        const currentUser = await firstValueFrom(service.currentUser);
+        expect(currentUser).toBeNull();
       }
     });
 
@@ -281,11 +291,6 @@ describe('UserService', () => {
   });
 
   describe('setAuth', () => {
-    it('should save token to JwtService', () => {
-      service.setAuth(mockUser);
-      expect(jwtService.saveToken).toHaveBeenCalledWith(mockUser.token);
-    });
-
     it('should update currentUser subject', async () => {
       const emissions: (User | null)[] = [];
       const sub = service.currentUser.subscribe(user => {
@@ -300,11 +305,6 @@ describe('UserService', () => {
   });
 
   describe('purgeAuth', () => {
-    it('should destroy token in JwtService', () => {
-      service.purgeAuth();
-      expect(jwtService.destroyToken).toHaveBeenCalled();
-    });
-
     it('should set currentUser to null', async () => {
       const emissions: (User | null)[] = [];
       const sub = service.currentUser.subscribe(user => {

@@ -1,6 +1,8 @@
 using ConduitApi;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.HttpOverrides;
+using System.Net;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -28,6 +30,29 @@ using (var scope = app.Services.CreateScope())
 }
 
 app.UseCors();
+
+// Forwarded headers middleware - must be before other middleware that uses IP
+// Configure trusted proxies/networks in production
+var forwardedHeadersOptions = new ForwardedHeadersOptions
+{
+    ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
+};
+
+// In development, trust all proxies (localhost)
+if (isDevelopment)
+{
+    forwardedHeadersOptions.KnownNetworks.Clear();
+    forwardedHeadersOptions.KnownProxies.Clear();
+    forwardedHeadersOptions.ForwardLimit = null;
+}
+else
+{
+    // In production, only trust specific proxies (configure via appsettings)
+    // forwardedHeadersOptions.KnownProxies.Add(IPAddress.Parse("127.0.0.1"));
+    // forwardedHeadersOptions.KnownNetworks.Add(new IPNetwork(IPAddress.Parse("10.0.0.0"), 8));
+}
+
+app.UseForwardedHeaders(forwardedHeadersOptions);
 app.UseMiddleware<RequestLoggingMiddleware>();
 app.UseMiddleware<RateLimitMiddleware>();
 app.UseMiddleware<CsrfProtectionMiddleware>();

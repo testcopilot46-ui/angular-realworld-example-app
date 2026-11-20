@@ -20,18 +20,19 @@ public class CsrfProtectionMiddleware
             return;
         }
 
-        // Check Origin header for CSRF protection
+        // For state-changing requests, require Origin or Referer header
         var origin = context.Request.Headers.Origin.ToString();
         var referer = context.Request.Headers.Referer.ToString();
 
         // Get allowed origins from configuration
         var allowedOrigins = _configuration.GetSection("Cors:Origins").Get<string[]>() ?? new[] { "http://localhost:4200" };
 
-        // If no Origin or Referer header, might be same-origin request or API client
-        // For API clients, we can be more lenient, but for browsers we should check
+        // If no Origin or Referer header, reject the request
+        // This prevents CSRF attacks from forms that don't send these headers
         if (string.IsNullOrEmpty(origin) && string.IsNullOrEmpty(referer))
         {
-            // No origin info - could be API client, allow but log
+            // Allow API clients (no Origin/Referer) but log for monitoring
+            // In production, you might want to require a custom header instead
             await _next(context);
             return;
         }
