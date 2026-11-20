@@ -82,8 +82,23 @@ export class UserService {
   }
 
   logout(): void {
+    // Always clear local state immediately for UX
     this.purgeAuth();
-    void this.router.navigate(['/']);
+
+    // Attempt to clear cookie via backend, but don't block navigation
+    this.http.post('/users/logout', {}).subscribe({
+      next: () => {
+        // Cookie cleared successfully
+        void this.router.navigate(['/']);
+      },
+      error: err => {
+        // Even if logout API fails, we've already cleared local state
+        // The httpOnly cookie may remain, but user sees logged-out UI
+        // On next page load, initAuth will check with backend
+        console.warn('Logout API failed, but local state cleared:', err);
+        void this.router.navigate(['/']);
+      },
+    });
   }
 
   getCurrentUser(): Observable<{ user: User }> {
@@ -129,19 +144,15 @@ export class UserService {
   private scheduleRetry(): void {
     this.cancelRetry();
 
-    if (!this.jwtService.getToken()) {
-      return; // No token, nothing to retry
-    }
-
+    // With httpOnly cookies, we can't check token existence
+    // We'll retry and let the server handle auth state
     // Calculate delay: 2, 4, 8, 16, 16, 16... (capped at 16s)
     const delaySeconds = Math.min(2 * Math.pow(2, this.retryAttempt), 16);
     this.retryAttempt++;
 
     this.retrySubscription = timer(delaySeconds * 1000).subscribe(() => {
-      if (this.jwtService.getToken()) {
-        this.authStateSubject.next('loading');
-        this.getCurrentUser().subscribe();
-      }
+      this.authStateSubject.next('loading');
+      this.getCurrentUser().subscribe();
     });
   }
 
@@ -166,7 +177,7 @@ export class UserService {
   setAuth(user: User): void {
     this.cancelRetry();
     this.retryAttempt = 0;
-    this.jwtService.saveToken(user.token);
+    // Token is now set via httpOnly cookie by backend, no need to save locally
     this.currentUserSubject.next(user);
     this.authStateSubject.next('authenticated');
   }
@@ -174,7 +185,6 @@ export class UserService {
   purgeAuth(): void {
     this.cancelRetry();
     this.retryAttempt = 0;
-    this.jwtService.destroyToken();
     this.currentUserSubject.next(null);
     this.authStateSubject.next('unauthenticated');
   }

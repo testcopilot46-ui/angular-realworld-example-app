@@ -1,8 +1,5 @@
-import 'zone.js';
-import 'zone.js/testing';
-import { describe, it, expect, beforeEach, afterEach, beforeAll, vi } from 'vitest';
-import { TestBed, getTestBed } from '@angular/core/testing';
-import { BrowserDynamicTestingModule, platformBrowserDynamicTesting } from '@angular/platform-browser-dynamic/testing';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { TestBed } from '@angular/core/testing';
 import { HttpClientTestingModule, HttpTestingController } from '@angular/common/http/testing';
 import { Router } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
@@ -11,10 +8,6 @@ import { JwtService } from './jwt.service';
 import { User } from '../user.model';
 
 describe('UserService', () => {
-  beforeAll(() => {
-    getTestBed().initTestEnvironment(BrowserDynamicTestingModule, platformBrowserDynamicTesting());
-  });
-
   let service: UserService;
   let httpMock: HttpTestingController;
   let jwtService: any;
@@ -22,7 +15,6 @@ describe('UserService', () => {
 
   const mockUser: User = {
     email: 'test@example.com',
-    token: 'test-jwt-token',
     username: 'testuser',
     bio: 'Test bio',
     image: 'https://example.com/avatar.jpg',
@@ -111,7 +103,11 @@ describe('UserService', () => {
       const req = httpMock.expectOne('/users/login');
       req.flush({ user: mockUser });
       await promise;
-      expect(jwtService.saveToken).toHaveBeenCalledWith(mockUser.token);
+      // With httpOnly cookies, jwtService.saveToken is a no-op
+      // The backend sets the cookie automatically
+      // setAuth is called internally, which updates currentUserSubject
+      const currentUser = await firstValueFrom(service.currentUser);
+      expect(currentUser).toEqual(mockUser);
     });
 
     it('should update currentUser after successful login', async () => {
@@ -163,7 +159,9 @@ describe('UserService', () => {
       const req = httpMock.expectOne('/users');
       req.flush({ user: mockUser });
       await promise;
-      expect(jwtService.saveToken).toHaveBeenCalledWith(mockUser.token);
+      // With httpOnly cookies, jwtService.saveToken is a no-op
+      const currentUser = await firstValueFrom(service.currentUser);
+      expect(currentUser).toEqual(mockUser);
     });
 
     it('should handle registration error', async () => {
@@ -181,9 +179,11 @@ describe('UserService', () => {
   });
 
   describe('logout', () => {
-    it('should call purgeAuth', () => {
+    it('should call purgeAuth and navigate', () => {
       service.logout();
-      expect(jwtService.destroyToken).toHaveBeenCalled();
+      // With httpOnly cookies, destroyToken is a no-op
+      // purgeAuth clears local state
+      expect(router.navigate).toHaveBeenCalledWith(['/']);
     });
 
     it('should navigate to home page', () => {
@@ -219,7 +219,9 @@ describe('UserService', () => {
       const req = httpMock.expectOne('/user');
       req.flush({ user: mockUser });
       await promise;
-      expect(jwtService.saveToken).toHaveBeenCalledWith(mockUser.token);
+      // With httpOnly cookies, jwtService.saveToken is a no-op
+      const currentUser = await firstValueFrom(service.currentUser);
+      expect(currentUser).toEqual(mockUser);
     });
 
     it('should call purgeAuth on error', async () => {
@@ -231,7 +233,10 @@ describe('UserService', () => {
         await promise;
         throw new Error('should have failed');
       } catch (error) {
-        expect(jwtService.destroyToken).toHaveBeenCalled();
+        // With httpOnly cookies, destroyToken is a no-op
+        // purgeAuth clears local state
+        const currentUser = await firstValueFrom(service.currentUser);
+        expect(currentUser).toBeNull();
       }
     });
 
@@ -286,11 +291,6 @@ describe('UserService', () => {
   });
 
   describe('setAuth', () => {
-    it('should save token to JwtService', () => {
-      service.setAuth(mockUser);
-      expect(jwtService.saveToken).toHaveBeenCalledWith(mockUser.token);
-    });
-
     it('should update currentUser subject', async () => {
       const emissions: (User | null)[] = [];
       const sub = service.currentUser.subscribe(user => {
@@ -305,11 +305,6 @@ describe('UserService', () => {
   });
 
   describe('purgeAuth', () => {
-    it('should destroy token in JwtService', () => {
-      service.purgeAuth();
-      expect(jwtService.destroyToken).toHaveBeenCalled();
-    });
-
     it('should set currentUser to null', async () => {
       const emissions: (User | null)[] = [];
       const sub = service.currentUser.subscribe(user => {
