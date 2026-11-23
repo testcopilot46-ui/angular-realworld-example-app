@@ -58,4 +58,8 @@ export const routes: Routes = [
     path: 'article/:slug',
     loadComponent: () => import('./features/article/pages/article/article.component'),
   },
+  {
+    path: 'help',
+    loadComponent: () => import('./features/help/help.component').then(m => m.default),
+  },
 ];
