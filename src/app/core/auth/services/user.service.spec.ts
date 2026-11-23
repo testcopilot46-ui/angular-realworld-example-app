@@ -183,11 +183,16 @@ describe('UserService', () => {
       service.logout();
       // With httpOnly cookies, destroyToken is a no-op
       // purgeAuth clears local state
+      // Handle the logout HTTP request
+      const req = httpMock.expectOne('/users/logout');
+      req.flush({});
       expect(router.navigate).toHaveBeenCalledWith(['/']);
     });
 
     it('should navigate to home page', () => {
       service.logout();
+      const req = httpMock.expectOne('/users/logout');
+      req.flush({});
       expect(router.navigate).toHaveBeenCalledWith(['/']);
     });
 
@@ -199,6 +204,8 @@ describe('UserService', () => {
       // First set a user
       service.setAuth(mockUser);
       service.logout();
+      const req = httpMock.expectOne('/users/logout');
+      req.flush({});
       await new Promise(resolve => setTimeout(resolve, 10));
       expect(emissions.length).toBe(3);
       expect(emissions[2]).toBeNull();
@@ -335,6 +342,8 @@ describe('UserService', () => {
       expect(emissions[1]).toEqual(mockUser);
       // Logout
       service.logout();
+      const logoutReq = httpMock.expectOne('/users/logout');
+      logoutReq.flush({});
       await new Promise(resolve => setTimeout(resolve, 10));
       expect(emissions[2]).toBeNull();
       sub.unsubscribe();

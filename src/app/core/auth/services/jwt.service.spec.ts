@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { TestBed } from '@angular/core/testing';
 import { JwtService } from './jwt.service';
 
@@ -6,11 +6,16 @@ describe('JwtService', () => {
   let service: JwtService;
 
   beforeEach(() => {
+    TestBed.resetTestingModule();
     TestBed.configureTestingModule({
       providers: [JwtService],
     });
 
     service = TestBed.inject(JwtService);
+  });
+
+  afterEach(() => {
+    TestBed.resetTestingModule();
   });
 
   it('should be created', () => {
