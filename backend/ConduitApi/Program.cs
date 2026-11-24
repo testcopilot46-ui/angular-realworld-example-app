@@ -29,6 +29,32 @@ using (var scope = app.Services.CreateScope())
     scope.ServiceProvider.GetRequiredService<AppDb>().Database.EnsureCreated();
 }
 
+app.Use(async (context, next) =>
+{
+    context.Response.Headers.Append("X-Content-Type-Options", "nosniff");
+    context.Response.Headers.Append("X-Frame-Options", "DENY");
+    context.Response.Headers.Append("X-XSS-Protection", "1; mode=block");
+    context.Response.Headers.Append("Referrer-Policy", "strict-origin-when-cross-origin");
+
+    // Content-Security-Policy
+    var csp = "default-src 'self'; " +
+               "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
+               "style-src 'self' 'unsafe-inline'; " +
+               "img-src 'self' data: https:; " +
+               "font-src 'self'; " +
+               "connect-src 'self'; " +
+               "frame-ancestors 'none';";
+    context.Response.Headers.Append("Content-Security-Policy", csp);
+
+    // HSTS (only in production)
+    if (!isDevelopment)
+    {
+        context.Response.Headers.Append("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+    }
+
+    await next();
+});
+
 app.UseCors();
 
 // Forwarded headers middleware - must be before other middleware that uses IP
@@ -58,33 +84,6 @@ app.UseForwardedHeaders(forwardedHeadersOptions);
 app.UseMiddleware<RequestLoggingMiddleware>();
 app.UseMiddleware<RateLimitMiddleware>();
 app.UseMiddleware<CsrfProtectionMiddleware>();
-
-app.Use(async (context, next) =>
-{
-    context.Response.Headers.Append("X-Content-Type-Options", "nosniff");
-    context.Response.Headers.Append("X-Frame-Options", "DENY");
-    context.Response.Headers.Append("X-XSS-Protection", "1; mode=block");
-    context.Response.Headers.Append("Referrer-Policy", "strict-origin-when-cross-origin");
-
-    // Content-Security-Policy
-    var csp = "default-src 'self'; " +
-               "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
-               "style-src 'self' 'unsafe-inline'; " +
-               "img-src 'self' data: https:; " +
-               "font-src 'self'; " +
-               "connect-src 'self' http://localhost:3000 https://localhost:3000; " +
-               "frame-ancestors 'none'; " +
-               "cookie-preference: 'self';";
-    context.Response.Headers.Append("Content-Security-Policy", csp);
-
-    // HSTS (only in production)
-    if (!isDevelopment)
-    {
-        context.Response.Headers.Append("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
-    }
-
-    await next();
-});
 
 app.MapConduitApi();
 
