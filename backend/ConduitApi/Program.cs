@@ -38,12 +38,14 @@ var forwardedHeadersOptions = new ForwardedHeadersOptions
     ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
 };
 
-// In development, trust all proxies (localhost)
+// In development, trust only loopback proxies (e.g. the Angular dev server) so
+// external clients cannot forge X-Forwarded-For to evade rate limits
 if (isDevelopment)
 {
     forwardedHeadersOptions.KnownNetworks.Clear();
     forwardedHeadersOptions.KnownProxies.Clear();
-    forwardedHeadersOptions.ForwardLimit = null;
+    forwardedHeadersOptions.KnownProxies.Add(IPAddress.Loopback);
+    forwardedHeadersOptions.KnownProxies.Add(IPAddress.IPv6Loopback);
 }
 else
 {

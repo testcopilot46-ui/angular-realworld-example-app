@@ -2,7 +2,7 @@ import { Injectable } from '@angular/core';
 import { Observable, BehaviorSubject, EMPTY, Subscription, timer } from 'rxjs';
 
 import { JwtService } from './jwt.service';
-import { map, distinctUntilChanged, tap, shareReplay, catchError } from 'rxjs/operators';
+import { map, distinctUntilChanged, tap, shareReplay, catchError, retry } from 'rxjs/operators';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { User } from '../user.model';
 import { Router } from '@angular/router';
@@ -86,19 +86,23 @@ export class UserService {
     this.purgeAuth();
 
     // Attempt to clear cookie via backend, but don't block navigation
-    this.http.post('/users/logout', {}).subscribe({
-      next: () => {
-        // Cookie cleared successfully
-        void this.router.navigate(['/']);
-      },
-      error: err => {
-        // Even if logout API fails, we've already cleared local state
-        // The httpOnly cookie may remain, but user sees logged-out UI
-        // On next page load, initAuth will check with backend
-        console.warn('Logout API failed, but local state cleared:', err);
-        void this.router.navigate(['/']);
-      },
-    });
+    // Retry once so a transient failure doesn't leave the session cookie active
+    this.http
+      .post('/users/logout', {})
+      .pipe(retry(1))
+      .subscribe({
+        next: () => {
+          // Cookie cleared successfully
+          void this.router.navigate(['/']);
+        },
+        error: err => {
+          // Even if logout API fails, we've already cleared local state
+          // The httpOnly cookie may remain, but user sees logged-out UI
+          // On next page load, initAuth will check with backend
+          console.warn('Logout API failed, but local state cleared:', err);
+          void this.router.navigate(['/']);
+        },
+      });
   }
 
   getCurrentUser(): Observable<{ user: User }> {

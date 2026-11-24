@@ -27,12 +27,24 @@ public class CsrfProtectionMiddleware
         // Get allowed origins from configuration
         var allowedOrigins = _configuration.GetSection("Cors:Origins").Get<string[]>() ?? new[] { "http://localhost:4200" };
 
-        // If no Origin or Referer header, reject the request
-        // This prevents CSRF attacks from forms that don't send these headers
+        // If no Origin or Referer header, the request is likely a non-browser API client.
+        // However, a request that relies on the ambient jwt cookie (no Authorization header)
+        // could still be a forged cross-site form post, so require a custom header that
+        // browsers cannot set without a CORS preflight.
         if (string.IsNullOrEmpty(origin) && string.IsNullOrEmpty(referer))
         {
-            // Allow API clients (no Origin/Referer) but log for monitoring
-            // In production, you might want to require a custom header instead
+            var usesCookieAuth = !string.IsNullOrEmpty(context.Request.Cookies["jwt"])
+                && string.IsNullOrEmpty(context.Request.Headers.Authorization.ToString());
+
+            if (usesCookieAuth &&
+                !context.Request.Headers["X-Requested-With"].ToString()
+                    .Equals("XMLHttpRequest", StringComparison.OrdinalIgnoreCase))
+            {
+                context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                await context.Response.WriteAsync("CSRF protection: missing X-Requested-With header");
+                return;
+            }
+
             await _next(context);
             return;
         }
